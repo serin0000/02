@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>黑鴉伯爵 · 盧西安·馮·諾克斯 | 3D 鐳射傳奇卡牌</title>
+  
+  <!-- Google Fonts: 典雅襯線與現代字體 -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;900&family=Noto+Serif+TC:wght@500;700;900&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+  
+  <!-- html2canvas: 一鍵匯出高解析度 PNG 卡牌 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+  <style>
+    /* ==========================================================================
+       1. 全域變數與重設 (Design Tokens & Reset)
+       ========================================================================== */
+    :root {
+      --bg-dark: #07090e;
+      --panel-bg: rgba(15, 20, 30, 0.75);
+      --panel-border: rgba(212, 175, 55, 0.25);
+      --accent-gold: #e6ca65;
+      --accent-crimson: #c81d25;
+      --accent-shadow: #1b2030;
+      --text-main: #f0f2f5;
+      --text-muted: #8b9bb4;
+      
+      /* 卡牌 3D 視差與座標變數 */
+      --pointer-x: 50%;
+      --pointer-y: 50%;
+      --rotate-x: 0deg;
+      --rotate-y: 0deg;
+      --glare-opacity: 0;
+      --foil-opacity: 0.85;
+      --scale: 1;
+
+      /* 標準 TCG 尺寸 (63mm x 88mm -> ~380px x 530px) */
+      --card-width: min(88vw, 380px);
+      --card-aspect: calc(63 / 88);
+      --card-radius: 18px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    body {
+      min-height: 100vh;
+      background: radial-gradient(circle at 50% 20%, #151c2c 0%, #080a10 60%, #030406 100%);
+      color: var(--text-main);
+      font-family: 'Outfit', 'Noto Serif TC', serif;
+      overflow-x: hidden;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+
+    /* 背景星塵與暗紋氛圍 */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: 
+        radial-gradient(1px 1px at 20px 30px, rgba(255,255,255,0.2), transparent),
+        radial-gradient(1.5px 1.5px at 150px 180px, rgba(230, 202, 101, 0.25), transparent),
+        radial-gradient(1px 1px at 320px 420px, rgba(200, 29, 37, 0.2), transparent);
+      background-size: 550px 550px;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* 頂部導航列 */
+    header {
+      position: relative;
+      z-index: 10;
+      padding: 16px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(12px);
+      background: rgba(8, 10, 16, 0.6);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-decoration: none;
+    }
+
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      background: linear-gradient(135deg, var(--accent-gold), var(--accent-crimson));
+      border-radius: 8px;
+      display: grid;
+      place-items: center;
+      box-shadow: 0 0 15px rgba(230, 202, 101, 0.4);
+    }
+
+    .brand-title {
+      font-family: 'Cinzel', serif;
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: 2px;
+      color: #fff;
+    }
+
+    .brand-tag {
+      font-size: 0.7rem;
+      background: rgba(230, 202, 101, 0.15);
+      color: var(--accent-gold);
+      padding: 3px 8px;
+      border-radius: 20px;
+      border: 1px solid rgba(230, 202, 101, 0.3);
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+
+    /* ==========================================================================
+       2. 主工作舞台架構 (RWD Workspace)
+       ========================================================================== */
+    main {
+      flex: 1;
+      position: relative;
+      z-index: 1;
+      display: grid;
+      grid-template-columns: 1fr;
+      align-items: center;
+      justify-items: center;
+      padding: 24px 20px 40px;
+      gap: 36px;
+      max-width: 1380px;
+      margin: 0 auto;
+      width: 100%;
+    }
+
+    @media (min-width: 1024px) {
+      main {
+        grid-template-columns: 1.15fr 0.85fr;
+        padding: 40px 48px;
+        gap: 56px;
+      }
+    }
+
+    /* ==========================================================================
+       3. 3D 卡牌舞台 (Card Parallax & Holographic Stage)
+       ========================================================================== */
+    .stage-wrapper {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      perspective: 1200px;
+    }
+
+    .card-container {
+      position: relative;
+      width: var(--card-width);
+      aspect-ratio: 63 / 88;
+      transform-style: preserve-3d;
+      transform: rotateX(var(--rotate-x)) rotateY(var(--rotate-y)) scale(var(--scale));
+      transition: transform 0.12s ease-out;
+      cursor: grab;
+      user-select: none;
+      touch-action: none;
+    }
+
+    .card-container:active {
+      cursor: grabbing;
+    }
+
+    .card-container.is-transitioning {
+      transition: transform 0.65s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+    }
+
+    .card-container.is-flipped {
+      transform: rotateX(var(--rotate-x)) rotateY(calc(var(--rotate-y) + 180deg)) scale(var(--scale));
+    }
+
+    /* 卡牌面本體 (正面 & 背面) */
+    .card-face {
+      position: absolute;
+      inset: 0;
+      border-radius: var(--card-radius);
+      backface-visibility: hidden;
+      overflow: hidden;
+      box-shadow: 
+        0 25px 50px -12px rgba(0, 0, 0, 0.85),
+        0 0 25px rgba(230, 202, 101, 0.25),
+        inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+    }
+
+    /* ----------------------------------------------------
+       卡牌正面結構 (The Front Card Design)
+       ---------------------------------------------------- */
+    .card-front {
+      background: #0f121a;
+      display: flex;
+      flex-direction: column;
+      padding: 14px;
+      color: #fff;
+      border: 2px solid #5a4b27;
+      background-clip: padding-box;
+      position: relative;
+    }
+
+    /* 燙金奢華邊框 */
+    .card-front::before {
+      content: '';
+      position: absolute;
+      inset: 4px;
+      border: 1px solid rgba(230, 202, 101, 0.5);
+      border-radius: calc(var(--card-radius) - 4px);
+      pointer-events: none;
+      z-index: 4;
+    }
+
+    /* 頂部資訊列 (Header: Stage, Name, HP, Type) */
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: relative;
+      z-index: 5;
+      margin-bottom: 8px;
+    }
+
+    .badge-stage {
+      font-size: 0.65rem;
+      font-weight: 800;
+      letter-spacing: 1px;
+      color: #e6ca65;
+      text-transform: uppercase;
+      background: linear-gradient(90deg, rgba(30,35,50,0.95), rgba(15,20,30,0.7));
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid #c9a444;
+      display: inline-block;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.5);
+    }
+
+    .character-name-group {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      margin-left: 8px;
+    }
+
+    .character-title {
+      font-size: 0.6rem;
+      letter-spacing: 1.5px;
+      color: #b0c0d8;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .character-name {
+      font-family: 'Cinzel', 'Noto Serif TC', serif;
+      font-size: clamp(0.95rem, 3.2vw, 1.25rem);
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      color: #fff;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.8), 0 0 10px rgba(230, 202, 101, 0.4);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .hp-group {
+      display: flex;
+      align-items: baseline;
+      gap: 4px;
+    }
+
+    .hp-label {
+      font-size: 0.65rem;
+      font-weight: 800;
+      color: #f75560;
+      letter-spacing: 0.5px;
+    }
+
+    .hp-value {
+      font-family: 'Cinzel', sans-serif;
+      font-size: 1.35rem;
+      font-weight: 900;
+      color: #fff;
+      text-shadow: 0 0 12px rgba(247, 85, 96, 0.6);
+      letter-spacing: -0.5px;
+    }
+
+    .element-icon {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #591b23, #15060b);
+      border: 1.5px solid #e6ca65;
+      display: grid;
+      place-items: center;
+      margin-left: 6px;
+      box-shadow: 0 0 10px rgba(200, 29, 37, 0.6);
+    }
+
+    .element-icon svg {
+      width: 14px;
+      height: 14px;
+      fill: #e6ca65;
+    }
+
+    /* ----------------------------------------------------
+       卡牌立繪插畫視窗 (Artwork Showcase)
+       ---------------------------------------------------- */
+    .artwork-frame {
+      position: relative;
+      width: 100%;
+      height: 44%;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1.5px solid #8f743a;
+      box-shadow: inset 0 0 20px rgba(0,0,0,0.85);
+      background: #090b10;
+      z-index: 3;
+    }
+
+    .card-image {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      object-position: center top;
+      display: block;
+      transition: filter 0.3s;
+    }
+
+    /* 立繪裝飾角線 */
+    .artwork-decor {
+      position: absolute;
+      inset: 6px;
+      border: 1px solid rgba(230, 202, 101, 0.3);
+      border-radius: 6px;
+      pointer-events: none;
+      z-index: 4;
+    }
+
+    .artwork-tag {
+      position: absolute;
+      bottom: 6px;
+      right: 8px;
+      background: rgba(0,0,0,0.75);
+      border: 1px solid rgba(230, 202, 101, 0.4);
+      padding: 1px 7px;
+      font-size: 0.55rem;
+      letter-spacing: 1px;
+      border-radius: 4px;
+      color: #e6ca65;
+      font-weight: 700;
+      z-index: 5;
+    }
+
+    /* ----------------------------------------------------
+       能力與招式欄 (Abilities & Attacks)
+       ---------------------------------------------------- */
+    .card-body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      margin-top: 8px;
+      position: relative;
+      z-index: 5;
+      gap: 6px;
+    }
+
+    /* 被動特性 */
+    .ability-box {
+      background: linear-gradient(135deg, rgba(200, 29, 37, 0.18), rgba(20, 25, 38, 0.7));
+      border: 1px solid rgba(200, 29, 37, 0.4);
+      border-left: 3px solid #c81d25;
+      border-radius: 6px;
+      padding: 5px 8px;
+    }
+
+    .ability-title-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 2px;
+    }
+
+    .ability-badge {
+      background: #c81d25;
+      color: #fff;
+      font-size: 0.55rem;
+      font-weight: 800;
+      padding: 1px 5px;
+      border-radius: 3px;
+      letter-spacing: 1px;
+    }
+
+    .ability-name {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: 0.5px;
+    }
+
+    .ability-desc {
+      font-size: 0.65rem;
+      line-height: 1.35;
+      color: #cbd5e1;
+    }
+
+    /* 招式一 (Normal Attack) */
+    .attack-box {
+      background: rgba(18, 23, 35, 0.7);
+      border: 1px solid rgba(230, 202, 101, 0.25);
+      border-radius: 6px;
+      padding: 6px 8px;
+    }
+
+    .attack-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 2px;
+    }
+
+    .energy-cost-group {
+      display: flex;
+      gap: 3px;
+      align-items: center;
+    }
+
+    .cost-pip {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #36171a;
+      border: 1px solid #e6ca65;
+      display: grid;
+      place-items: center;
+    }
+
+    .cost-pip svg {
+      width: 8px;
+      height: 8px;
+      fill: #e6ca65;
+    }
+
+    .cost-pip.colorless {
+      background: #394254;
+      border-color: #cbd5e1;
+    }
+
+    .cost-pip.colorless svg {
+      fill: #ffffff;
+    }
+
+    .attack-name {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #fff;
+      margin-left: 5px;
+      flex: 1;
+    }
+
+    .attack-damage {
+      font-family: 'Cinzel', sans-serif;
+      font-size: 1.05rem;
+      font-weight: 800;
+      color: #e6ca65;
+      text-shadow: 0 0 8px rgba(230, 202, 101, 0.4);
+    }
+
+    .attack-desc {
+      font-size: 0.62rem;
+      line-height: 1.35;
+      color: #cbd5e1;
+    }
+
+    /* 奧義絕招 (Ultimate Attack) */
+    .ultimate-box {
+      background: linear-gradient(135deg, rgba(30, 15, 20, 0.85), rgba(40, 32, 15, 0.85));
+      border: 1px solid #d4af37;
+      border-radius: 6px;
+      padding: 6px 8px;
+      box-shadow: 0 0 10px rgba(212, 175, 55, 0.2);
+      position: relative;
+    }
+
+    .ultimate-badge {
+      position: absolute;
+      top: -6px;
+      right: 8px;
+      background: linear-gradient(90deg, #d4af37, #9b111e);
+      color: #fff;
+      font-size: 0.5rem;
+      font-weight: 900;
+      letter-spacing: 1px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      border: 1px solid #ffe599;
+    }
+
+    .ultimate-damage {
+      font-family: 'Cinzel', sans-serif;
+      font-size: 1.15rem;
+      font-weight: 900;
+      color: #ff3b47;
+      text-shadow: 0 0 10px rgba(255, 59, 71, 0.7);
+    }
+
+    /* ----------------------------------------------------
+       底部弱點、抗性、撤退與版權認證 (Footer & Authentication)
+       ---------------------------------------------------- */
+    .card-footer {
+      position: relative;
+      z-index: 5;
+      margin-top: 4px;
+      padding-top: 4px;
+      border-top: 1px solid rgba(230, 202, 101, 0.2);
+    }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      text-align: center;
+      font-size: 0.6rem;
+      color: #cbd5e1;
+      margin-bottom: 4px;
+    }
+
+    .stat-label {
+      color: #8fa0be;
+      font-size: 0.5rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 1px;
+    }
+
+    .stat-value {
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+    }
+
+    .copyright-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.48rem;
+      color: #7d8b9e;
+      letter-spacing: 0.5px;
+    }
+
+    .holo-stamp {
+      width: 14px;
+      height: 14px;
+      border-radius: 3px;
+      background: linear-gradient(135deg, #ff007f, #00f0ff, #ffe600);
+      border: 1px solid #fff;
+      box-shadow: 0 0 5px rgba(255, 255, 255, 0.6);
+      animation: stampGlow 3s infinite linear;
+    }
+
+    @keyframes stampGlow {
+      0% { filter: hue-rotate(0deg); }
+      100% { filter: hue-rotate(360deg); }
+    }
+
+    /* ----------------------------------------------------
+       4. 動態鐳射光澤與反光層 (Holographic Foil Layers)
+       ---------------------------------------------------- */
+    .foil-layer, .glare-layer {
+      position: absolute;
+      inset: 0;
+      border-radius: var(--card-radius);
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* 光斑層 (Glare) */
+    .glare-layer {
+      background: radial-gradient(
+        circle 320px at var(--pointer-x) var(--pointer-y),
+        rgba(255, 255, 255, 0.7) 0%,
+        rgba(255, 255, 255, 0.2) 30%,
+        transparent 75%
+      );
+      mix-blend-mode: overlay;
+      opacity: var(--glare-opacity);
+      transition: opacity 0.2s ease;
+    }
+
+    /* 鐳射風格 1: Gold Ultra (黑金浮雕) */
+    .card-container[data-foil="gold"] .foil-layer {
+      background: 
+        radial-gradient(
+          circle 400px at var(--pointer-x) var(--pointer-y),
+          rgba(255, 225, 120, 0.75) 0%,
+          rgba(212, 175, 55, 0.45) 30%,
+          transparent 75%
+        ),
+        repeating-linear-gradient(
+          45deg,
+          rgba(212, 175, 55, 0.15) 0px,
+          rgba(212, 175, 55, 0.15) 2px,
+          transparent 2px,
+          transparent 6px
+        );
+      mix-blend-mode: color-dodge;
+      opacity: var(--foil-opacity);
+    }
+
+    /* 鐳射風格 2: Cosmos Holo (宇宙彩虹) */
+    .card-container[data-foil="cosmos"] .foil-layer {
+      background: 
+        radial-gradient(
+          circle 350px at var(--pointer-x) var(--pointer-y),
+          rgba(255, 255, 255, 0.9) 0%,
+          rgba(255, 0, 150, 0.4) 25%,
+          rgba(0, 200, 255, 0.4) 50%,
+          rgba(255, 220, 0, 0.3) 75%,
+          transparent 100%
+        ),
+        radial-gradient(circle 2px at 20% 30%, #fff 100%, transparent),
+        radial-gradient(circle 2px at 70% 60%, #fff 100%, transparent),
+        radial-gradient(circle 2px at 40% 80%, #fff 100%, transparent);
+      background-size: 100% 100%, 80px 80px, 110px 110px, 90px 90px;
+      mix-blend-mode: color-dodge;
+      opacity: var(--foil-opacity);
+      filter: brightness(1.2) contrast(1.3);
+    }
+
+    /* 鐳射風格 3: Rainbow Secret (極光全息) */
+    .card-container[data-foil="rainbow"] .foil-layer {
+      background: 
+        linear-gradient(
+          calc(var(--rotate-y) * 4 + 115deg),
+          rgba(255, 0, 0, 0.4) 0%,
+          rgba(255, 154, 0, 0.4) 15%,
+          rgba(208, 222, 33, 0.4) 30%,
+          rgba(79, 220, 74, 0.4) 45%,
+          rgba(63, 218, 216, 0.4) 60%,
+          rgba(47, 77, 211, 0.4) 75%,
+          rgba(183, 44, 210, 0.4) 90%,
+          rgba(255, 0, 0, 0.4) 100%
+        ),
+        radial-gradient(circle at var(--pointer-x) var(--pointer-y), rgba(255,255,255,0.7) 0%, transparent 60%);
+      mix-blend-mode: color-dodge;
+      opacity: var(--foil-opacity);
+      filter: contrast(1.4) saturate(1.4);
+    }
+
+    /* 鐳射風格 4: Silver Phantom (冷冽銀鏡) */
+    .card-container[data-foil="silver"] .foil-layer {
+      background: 
+        radial-gradient(
+          circle 450px at var(--pointer-x) var(--pointer-y),
+          rgba(255, 255, 255, 0.95) 0%,
+          rgba(200, 220, 255, 0.5) 35%,
+          rgba(100, 130, 180, 0.2) 65%,
+          transparent 80%
+        ),
+        linear-gradient(135deg, rgba(255,255,255,0.2) 0%, transparent 50%, rgba(255,255,255,0.2) 100%);
+      mix-blend-mode: hard-light;
+      opacity: var(--foil-opacity);
+    }
+
+    /* ----------------------------------------------------
+       5. 卡牌背面結構 (The Gothic Back Design)
+       ---------------------------------------------------- */
+    .card-back {
+      background: #080a10;
+      border: 3px solid #5a4b27;
+      transform: rotateY(180deg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      position: relative;
+    }
+
+    .card-back::before {
+      content: '';
+      position: absolute;
+      inset: 8px;
+      border: 2px solid rgba(212, 175, 55, 0.5);
+      border-radius: calc(var(--card-radius) - 8px);
+      pointer-events: none;
+    }
+
+    .back-emblem-box {
+      width: 170px;
+      height: 170px;
+      border-radius: 50%;
+      border: 2px solid #e6ca65;
+      display: grid;
+      place-items: center;
+      background: radial-gradient(circle, #2a1118 0%, #0c0e16 70%);
+      box-shadow: 0 0 35px rgba(212, 175, 55, 0.4), inset 0 0 25px rgba(200, 29, 37, 0.6);
+      position: relative;
+    }
+
+    .back-emblem-box svg {
+      width: 90px;
+      height: 90px;
+      fill: #e6ca65;
+      filter: drop-shadow(0 0 10px rgba(230, 202, 101, 0.8));
+    }
+
+    .back-title {
+      margin-top: 24px;
+      font-family: 'Cinzel', serif;
+      font-size: 1.25rem;
+      letter-spacing: 4px;
+      color: #e6ca65;
+      text-shadow: 0 0 10px rgba(212, 175, 55, 0.5);
+      text-align: center;
+    }
+
+    .back-sub {
+      font-size: 0.65rem;
+      letter-spacing: 3px;
+      color: #8b9bb4;
+      text-transform: uppercase;
+      margin-top: 6px;
+    }
+
+    /* ==========================================================================
+       6. 磨砂玻璃互動控制面板 (Glassmorphism Control Panel)
+       ========================================================================== */
+    .control-panel {
+      width: 100%;
+      max-width: 500px;
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: 20px;
+      padding: 28px 24px;
+      backdrop-filter: blur(20px);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    .panel-header {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 14px;
+    }
+
+    .panel-title {
+      font-family: 'Cinzel', serif;
+      font-size: 1.2rem;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .panel-title span {
+      color: var(--accent-gold);
+    }
+
+    .panel-desc {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    .section-title {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--accent-gold);
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    /* 鐳射箔膜切換按鈕組 */
+    .foil-selector-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .foil-btn {
+      background: rgba(25, 32, 48, 0.8);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: #cbd5e1;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.25s ease;
+    }
+
+    .foil-btn:hover {
+      background: rgba(35, 45, 68, 0.95);
+      border-color: rgba(230, 202, 101, 0.5);
+      color: #fff;
+      transform: translateY(-2px);
+    }
+
+    .foil-btn.active {
+      background: linear-gradient(135deg, rgba(230, 202, 101, 0.25), rgba(200, 29, 37, 0.2));
+      border-color: var(--accent-gold);
+      color: #fff;
+      box-shadow: 0 0 15px rgba(230, 202, 101, 0.3);
+    }
+
+    .foil-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .dot-gold { background: linear-gradient(135deg, #ffe178, #d4af37); }
+    .dot-cosmos { background: linear-gradient(135deg, #ff007f, #00f0ff); }
+    .dot-rainbow { background: linear-gradient(135deg, #ff3b47, #38ef7d, #0052d4); }
+    .dot-silver { background: linear-gradient(135deg, #ffffff, #a1a8ba); }
+
+    /* 控制按鈕組 (翻轉、重置、自動展示) */
+    .action-btn-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+    }
+
+    .action-btn {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 10px;
+      padding: 10px 8px;
+      color: #fff;
+      font-size: 0.75rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.2s ease;
+    }
+
+    .action-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+      border-color: rgba(230, 202, 101, 0.4);
+      transform: translateY(-2px);
+    }
+
+    .action-btn.active {
+      background: rgba(230, 202, 101, 0.2);
+      border-color: var(--accent-gold);
+      color: var(--accent-gold);
+    }
+
+    /* 檔案上傳與客製化 */
+    .upload-zone {
+      border: 1.5px dashed rgba(230, 202, 101, 0.35);
+      border-radius: 12px;
+      padding: 12px;
+      text-align: center;
+      background: rgba(10, 15, 24, 0.4);
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .upload-zone:hover {
+      border-color: var(--accent-gold);
+      background: rgba(230, 202, 101, 0.06);
+    }
+
+    .upload-label {
+      font-size: 0.75rem;
+      color: #cbd5e1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+    }
+
+    /* 一鍵匯出按鈕 */
+    .export-btn {
+      width: 100%;
+      background: linear-gradient(135deg, #d4af37 0%, #b8860b 50%, #990000 100%);
+      border: 1px solid #ffe599;
+      color: #fff;
+      padding: 14px;
+      border-radius: 12px;
+      font-size: 0.92rem;
+      font-weight: 800;
+      letter-spacing: 1.5px;
+      cursor: pointer;
+      box-shadow: 0 10px 25px rgba(212, 175, 55, 0.35);
+      transition: all 0.25s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      text-transform: uppercase;
+    }
+
+    .export-btn:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 15px 30px rgba(212, 175, 55, 0.55);
+      filter: brightness(1.1);
+    }
+
+    .export-btn:active {
+      transform: translateY(0);
+    }
+
+    .edit-hint {
+      font-size: 0.68rem;
+      color: #7b8ea8;
+      text-align: center;
+      line-height: 1.4;
+      background: rgba(0,0,0,0.3);
+      padding: 8px;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    /* 支援 contenteditable 的欄位微光反饋 */
+    [contenteditable="true"] {
+      outline: none;
+      transition: background 0.2s;
+      border-radius: 3px;
+    }
+
+    [contenteditable="true"]:hover {
+      background: rgba(230, 202, 101, 0.15);
+      cursor: text;
+    }
+
+    [contenteditable="true"]:focus {
+      background: rgba(230, 202, 101, 0.25);
+      box-shadow: 0 0 0 1px var(--accent-gold);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- 頂部導航 -->
+  <header>
+    <a href="#" class="brand">
+      <div class="brand-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+        </svg>
+      </div>
+      <div>
+        <div class="brand-title">LEGENDARY TCG</div>
+      </div>
+    </a>
+    <span class="brand-tag">SAR ★★★ LIMITED</span>
+  </header>
+
+  <!-- 主工作台 -->
+  <main>
+    
+    <!-- 左側：3D 卡牌視差舞台 -->
+    <div class="stage-wrapper">
+      <div class="card-container" id="cardContainer" data-foil="gold">
+        
+        <!-- 卡牌正面 -->
+        <div class="card-face card-front" id="cardToExport">
+          
+          <!-- 頂部資訊列 -->
+          <div class="card-header">
+            <span class="badge-stage" contenteditable="true">STAGE 2 SAR</span>
+            <div class="character-name-group">
+              <span class="character-title" contenteditable="true">Count of Ravens</span>
+              <h2 class="character-name" contenteditable="true">黑鴉伯爵 · 盧西安</h2>
+            </div>
+            <div class="hp-group">
+              <span class="hp-label">HP</span>
+              <span class="hp-value" contenteditable="true">340</span>
+            </div>
+            <div class="element-icon" title="暗影緋紅屬性">
+              <!-- 月牙與暗羽 SVG -->
+              <svg viewBox="0 0 24 24">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+              </svg>
+            </div>
+          </div>
+
+          <!-- 插畫視窗 -->
+          <div class="artwork-frame">
+            <!-- 預設插畫：黑髮微卷紅瞳與肩上渡鴉的貴族肖像 -->
+            <img id="cardImageDisplay" class="card-image" src="card-art.jpg" alt="黑鴉伯爵 盧西安" onerror="this.src='https://images.unsplash.com/photo-1579783902614-a3fb3927b675?auto=format&fit=crop&w=800&q=80';">
+            <div class="artwork-decor"></div>
+            <span class="artwork-tag">SPECIAL ART RARE</span>
+          </div>
+
+          <!-- 能力與招式 -->
+          <div class="card-body">
+            
+            <!-- 被動特性 -->
+            <div class="ability-box">
+              <div class="ability-title-row">
+                <span class="ability-badge">特性</span>
+                <span class="ability-name" contenteditable="true">夜羽密誓</span>
+              </div>
+              <p class="ability-desc" contenteditable="true">
+                當此卡牌在場時，對手全體招式命中率降低 20%；己方回合開始時，可持續感知並揭露對手的所有暗置手牌。
+              </p>
+            </div>
+
+            <!-- 招式一 -->
+            <div class="attack-box">
+              <div class="attack-header">
+                <div class="energy-cost-group">
+                  <div class="cost-pip"><svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></div>
+                  <div class="cost-pip"><svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></div>
+                </div>
+                <span class="attack-name" contenteditable="true">鴉影突襲</span>
+                <span class="attack-damage" contenteditable="true">90</span>
+              </div>
+              <p class="attack-desc" contenteditable="true">
+                召喚群鴉羽刃撕裂虛空；若目標處於異常狀態，額外吸取 30 點生命值轉換為自身護盾。
+              </p>
+            </div>
+
+            <!-- 奧義絕招 -->
+            <div class="ultimate-box">
+              <span class="ultimate-badge">終極奧義</span>
+              <div class="attack-header">
+                <div class="energy-cost-group">
+                  <div class="cost-pip"><svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></div>
+                  <div class="cost-pip"><svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></div>
+                  <div class="cost-pip"><svg viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg></div>
+                  <div class="cost-pip colorless"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg></div>
+                </div>
+                <span class="attack-name" contenteditable="true">永夜血宴 · 死亡凝視</span>
+                <span class="ultimate-damage" contenteditable="true">280+</span>
+              </div>
+              <p class="attack-desc" contenteditable="true">
+                猩紅魔眼全開，降臨暗夜領域造成 280 點毀滅傷害；若目標殘血，直接宣判退場並封鎖調度。
+              </p>
+            </div>
+
+          </div>
+
+          <!-- 底部對抗與認證 -->
+          <div class="card-footer">
+            <div class="stats-row">
+              <div>
+                <div class="stat-label">弱點</div>
+                <div class="stat-value" contenteditable="true">聖光 ×2</div>
+              </div>
+              <div>
+                <div class="stat-label">抗性</div>
+                <div class="stat-value" contenteditable="true">心靈 -30</div>
+              </div>
+              <div>
+                <div class="stat-label">撤退成本</div>
+                <div class="stat-value">
+                  <div class="cost-pip colorless" style="width:11px; height:11px;"><svg viewBox="0 0 24 24" style="width:6px; height:6px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg></div>
+                  <div class="cost-pip colorless" style="width:11px; height:11px;"><svg viewBox="0 0 24 24" style="width:6px; height:6px;"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="copyright-row">
+              <span contenteditable="true">Illus. Lucian Atelier & Antigravity</span>
+              <div class="holo-stamp" title="防偽全息標記"></div>
+              <span contenteditable="true">No. 013/066 ★★★ SAR</span>
+              <span contenteditable="true">© 2026 Ravenfrost Citadel</span>
+            </div>
+          </div>
+
+          <!-- 鐳射與光斑疊加層 -->
+          <div class="foil-layer"></div>
+          <div class="glare-layer"></div>
+
+        </div>
+
+        <!-- 卡牌背面 (180度翻轉背面) -->
+        <div class="card-face card-back">
+          <div class="back-emblem-box">
+            <!-- 渡鴉展翅神聖紋章 -->
+            <svg viewBox="0 0 24 24">
+              <path d="M12 2L9 9l-7 1 5 5-1 7 6-3 6 3-1-7 5-5-7-1z"></path>
+            </svg>
+          </div>
+          <div class="back-title">LEGENDARY TCG</div>
+          <div class="back-sub">RAVENFROST CITADEL</div>
+          <div class="foil-layer"></div>
+          <div class="glare-layer"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- 右側：磨砂玻璃互動控制面板 -->
+    <div class="control-panel">
+      
+      <div class="panel-header">
+        <h3 class="panel-title">
+          <span>❖</span> 卡牌工坊控制台
+        </h3>
+        <p class="panel-desc">即時體驗 3D 視差、更換全息反光風格，或自訂專屬立繪與文字。</p>
+      </div>
+
+      <!-- 鐳射箔膜切換 -->
+      <div>
+        <div class="section-title">
+          <span>全息箔膜材質 (Foil Style)</span>
+          <span id="currentFoilName" style="color:#cbd5e1; font-size:0.7rem;">黑金浮雕</span>
+        </div>
+        <div class="foil-selector-grid">
+          <button class="foil-btn active" data-style="gold">
+            <span class="foil-dot dot-gold"></span>
+            Gold Ultra 黑金浮雕
+          </button>
+          <button class="foil-btn" data-style="cosmos">
+            <span class="foil-dot dot-cosmos"></span>
+            Cosmos Holo 宇宙彩虹
+          </button>
+          <button class="foil-btn" data-style="rainbow">
+            <span class="foil-dot dot-rainbow"></span>
+            Rainbow Secret 極光全息
+          </button>
+          <button class="foil-btn" data-style="silver">
+            <span class="foil-dot dot-silver"></span>
+            Silver Phantom 冷冽銀鏡
+          </button>
+        </div>
+      </div>
+
+      <!-- 視角與互動按鈕 -->
+      <div>
+        <div class="section-title">
+          <span>卡牌視角與展示 (3D Controls)</span>
+        </div>
+        <div class="action-btn-row">
+          <button class="action-btn" id="btnFlip">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.3"/>
+            </svg>
+            翻轉卡背
+          </button>
+          <button class="action-btn" id="btnAutoTour">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            自動巡航
+          </button>
+          <button class="action-btn" id="btnReset">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+            </svg>
+            視角歸零
+          </button>
+        </div>
+      </div>
+
+      <!-- 自訂上傳圖片 -->
+      <div>
+        <div class="section-title">
+          <span>替換立繪插畫 (Portrait Upload)</span>
+        </div>
+        <div class="upload-zone" onclick="document.getElementById('imageFileInput').click()">
+          <input type="file" id="imageFileInput" accept="image/*" style="display:none">
+          <label class="upload-label">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            點擊上傳本地圖片即時預覽
+          </label>
+        </div>
+      </div>
+
+      <!-- 文字即時修改提醒 -->
+      <div class="edit-hint">
+        💡 <b>提示</b>：卡面上所有的文字（姓名、HP、招式數值、說明文）皆可直接<b>點選編輯</b>！
+      </div>
+
+      <!-- 一鍵匯出高解析度 PNG -->
+      <button class="export-btn" id="btnExport">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+        </svg>
+        一鍵匯出高畫質 PNG 卡牌
+      </button>
+
+    </div>
+
+  </main>
+
+  <!-- ==========================================================================
+       7. 原生互動與 3D 光學演算法 (Vanilla JS Engine)
+       ========================================================================== -->
+  <script>
+    (function() {
+      const card = document.getElementById('cardContainer');
+      const exportTarget = document.getElementById('cardToExport');
+      let isInteracting = false;
+      let isAutoTour = false;
+      let autoTourTimer = null;
+      let autoTourAngle = 0;
+      const MAX_ROTATION = 22; // 最大傾斜角度
+
+      // ----------------------------------------------------
+      // A. 3D 視差與光學座標計算
+      // ----------------------------------------------------
+      function updateCardTransform(x, y, rect) {
+        // x, y 為相對於卡牌左上角的座標
+        const px = Math.min(Math.max((x / rect.width) * 100, 0), 100);
+        const py = Math.min(Math.max((y / rect.height) * 100, 0), 100);
+
+        // 轉換為 -1 到 1 的正規化係數
+        const normX = (px - 50) / 50;
+        const normY = (py - 50) / 50;
+
+        const rotateX = -normY * MAX_ROTATION;
+        const rotateY = normX * MAX_ROTATION;
+
+        card.style.setProperty('--pointer-x', `${px}%`);
+        card.style.setProperty('--pointer-y', `${py}%`);
+        card.style.setProperty('--rotate-x', `${rotateX.toFixed(2)}deg`);
+        card.style.setProperty('--rotate-y', `${rotateY.toFixed(2)}deg`);
+        card.style.setProperty('--glare-opacity', '0.85');
+      }
+
+      function resetCardTransform() {
+        if (isAutoTour) return;
+        card.classList.add('is-transitioning');
+        card.style.setProperty('--rotate-x', '0deg');
+        card.style.setProperty('--rotate-y', '0deg');
+        card.style.setProperty('--pointer-x', '50%');
+        card.style.setProperty('--pointer-y', '50%');
+        card.style.setProperty('--glare-opacity', '0');
+
+        setTimeout(() => {
+          card.classList.remove('is-transitioning');
+        }, 650);
+      }
+
+      // ----------------------------------------------------
+      // B. 游標與觸控事件監聽
+      // ----------------------------------------------------
+      card.addEventListener('pointerenter', () => {
+        if (isAutoTour) stopAutoTour();
+        card.classList.remove('is-transitioning');
+        isInteracting = true;
+      });
+
+      card.addEventListener('pointermove', (e) => {
+        if (!isInteracting) isInteracting = true;
+        const rect = card.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+        updateCardTransform(x, y, rect);
+      });
+
+      card.addEventListener('pointerleave', () => {
+        isInteracting = false;
+        resetCardTransform();
+      });
+
+      // 支援手機陀螺儀 (DeviceOrientation)
+      if (window.DeviceOrientationEvent) {
+        window.addEventListener('deviceorientation', (e) => {
+          if (isInteracting || isAutoTour || card.classList.contains('is-flipped')) return;
+          const gamma = e.gamma; // 左右傾斜 [-90, 90]
+          const beta = e.beta;   // 前後傾斜 [-180, 180]
+          if (gamma !== null && beta !== null) {
+            const rotY = Math.max(-MAX_ROTATION, Math.min(MAX_ROTATION, gamma * 0.7));
+            const rotX = Math.max(-MAX_ROTATION, Math.min(MAX_ROTATION, (beta - 45) * 0.7));
+            card.style.setProperty('--rotate-x', `${-rotX}deg`);
+            card.style.setProperty('--rotate-y', `${rotY}deg`);
+            card.style.setProperty('--pointer-x', `${50 + (gamma * 1.2)}%`);
+            card.style.setProperty('--pointer-y', `${50 + ((beta - 45) * 1.2)}%`);
+            card.style.setProperty('--glare-opacity', '0.5');
+          }
+        });
+      }
+
+      // ----------------------------------------------------
+      // C. 鐳射風格切換
+      // ----------------------------------------------------
+      const foilButtons = document.querySelectorAll('.foil-btn');
+      const currentFoilName = document.getElementById('currentFoilName');
+      const foilLabels = {
+        gold: 'Gold Ultra 黑金浮雕',
+        cosmos: 'Cosmos Holo 宇宙彩虹',
+        rainbow: 'Rainbow Secret 極光全息',
+        silver: 'Silver Phantom 冷冽銀鏡'
+      };
+
+      foilButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+          foilButtons.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          const style = btn.getAttribute('data-style');
+          card.setAttribute('data-foil', style);
+          currentFoilName.textContent = foilLabels[style] || style;
+        });
+      });
+
+      // ----------------------------------------------------
+      // D. 卡背翻轉與自動巡航控制
+      // ----------------------------------------------------
+      const btnFlip = document.getElementById('btnFlip');
+      btnFlip.addEventListener('click', () => {
+        card.classList.toggle('is-flipped');
+        btnFlip.classList.toggle('active', card.classList.contains('is-flipped'));
+      });
+
+      const btnReset = document.getElementById('btnReset');
+      btnReset.addEventListener('click', () => {
+        stopAutoTour();
+        card.classList.remove('is-flipped');
+        btnFlip.classList.remove('active');
+        resetCardTransform();
+      });
+
+      const btnAutoTour = document.getElementById('btnAutoTour');
+      function startAutoTour() {
+        isAutoTour = true;
+        btnAutoTour.classList.add('active');
+        card.classList.remove('is-transitioning');
+        
+        autoTourTimer = setInterval(() => {
+          autoTourAngle += 0.04;
+          const rx = Math.sin(autoTourAngle) * (MAX_ROTATION * 0.75);
+          const ry = Math.cos(autoTourAngle) * (MAX_ROTATION * 0.85);
+          const px = 50 + Math.cos(autoTourAngle) * 40;
+          const py = 50 + Math.sin(autoTourAngle) * 40;
+
+          card.style.setProperty('--rotate-x', `${rx.toFixed(2)}deg`);
+          card.style.setProperty('--rotate-y', `${ry.toFixed(2)}deg`);
+          card.style.setProperty('--pointer-x', `${px.toFixed(2)}%`);
+          card.style.setProperty('--pointer-y', `${py.toFixed(2)}%`);
+          card.style.setProperty('--glare-opacity', '0.75');
+        }, 16);
+      }
+
+      function stopAutoTour() {
+        if (!isAutoTour) return;
+        isAutoTour = false;
+        btnAutoTour.classList.remove('active');
+        clearInterval(autoTourTimer);
+        resetCardTransform();
+      }
+
+      btnAutoTour.addEventListener('click', () => {
+        if (isAutoTour) stopAutoTour();
+        else startAutoTour();
+      });
+
+      // ----------------------------------------------------
+      // E. 本地圖片即時 FileReader 上傳替換
+      // ----------------------------------------------------
+      const imageFileInput = document.getElementById('imageFileInput');
+      const cardImageDisplay = document.getElementById('cardImageDisplay');
+
+      imageFileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (file) {
+          const reader = new FileReader();
+          reader.onload = (event) => {
+            cardImageDisplay.src = event.target.result;
+          };
+          reader.readAsDataURL(file);
+        }
+      });
+
+      // ----------------------------------------------------
+      // F. 一鍵匯出高解析度 PNG 卡牌 (html2canvas)
+      // ----------------------------------------------------
+      const btnExport = document.getElementById('btnExport');
+      btnExport.addEventListener('click', async () => {
+        const originalText = btnExport.innerHTML;
+        btnExport.innerHTML = `<span>⏳ 正在鑄造高畫質卡面...</span>`;
+        btnExport.style.pointerEvents = 'none';
+
+        // 確保重置角度以獲得最完美的正面截圖
+        const wasFlipped = card.classList.contains('is-flipped');
+        if (wasFlipped) card.classList.remove('is-flipped');
+        
+        card.style.setProperty('--rotate-x', '0deg');
+        card.style.setProperty('--rotate-y', '0deg');
+        card.style.setProperty('--glare-opacity', '0');
+
+        try {
+          await new Promise(r => setTimeout(r, 200));
+
+          const canvas = await html2canvas(exportTarget, {
+            scale: 3, // 3倍超高解析度
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: null
+          });
+
+          const link = document.createElement('a');
+          link.download = `TCG_Card_Lucian_von_Nox_SAR.png`;
+          link.href = canvas.toDataURL('image/png');
+          link.click();
+        } catch (err) {
+          console.error('Export failed:', err);
+          alert('匯出卡面時遇到狀況，請確認圖片來源或稍後再試。');
+        } finally {
+          btnExport.innerHTML = originalText;
+          btnExport.style.pointerEvents = 'auto';
+          if (wasFlipped) card.classList.add('is-flipped');
+        }
+      });
+
+    })();
+  </script>
+</body>
+</html>
